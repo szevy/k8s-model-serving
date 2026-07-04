@@ -22,6 +22,8 @@ Client request
       |
       v
   FastAPI app (/health, /predict)
+
+  HPA monitors CPU and scales the Deployment's pods between min and max replicas.
 ```
 
 - **FastAPI service** exposes a `/health` endpoint (for probes) and a `/predict` endpoint (inference).
@@ -41,7 +43,8 @@ Client request
 │   └── Dockerfile          # Container image definition
 └── k8s/                    # Kubernetes manifests
     ├── deployment.yaml     # Deployment (health probes, resource limits)
-    └── service.yaml        # Service (NodePort)
+    ├── service.yaml        # Service (NodePort)
+    └── hpa.yaml            # Horizontal Pod Autoscaler
 ```
 
 ## Key Kubernetes Features Demonstrated
@@ -89,7 +92,7 @@ Client request
 6. **Enable autoscaling** (requires metrics-server)
    ```bash
    minikube addons enable metrics-server
-   kubectl autoscale deployment model-service --cpu=50% --min=1 --max=5
+   kubectl apply -f k8s/hpa.yaml
    kubectl get hpa
    ```
 
