@@ -106,7 +106,8 @@ kubectl logs -l app=model-service        # logs across all pods via label
 kubectl get pods                         # STATUS and READY columns
 kubectl describe pod <pod-name>          # Events section shows the cause of failures
 kubectl get events --sort-by=.metadata.creationTimestamp
-kubectl get endpoints model-service      # is the Service wired to pods?
+kubectl get endpointslices -l kubernetes.io/service-name=model-service   # pod IPs the Service routes to
+# older equivalent: kubectl get endpoints model-service (deprecated in v1.33+)
 kubectl rollout status deployment/model-service
 ```
 
