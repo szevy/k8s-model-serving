@@ -12,6 +12,15 @@ spec:
       labels:
         app: model-service
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: model-service
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: model-service
         image: model-service:latest
@@ -42,4 +51,3 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
-            

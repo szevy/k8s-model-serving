@@ -165,6 +165,29 @@ curl -H "Host: model-service.local" http://localhost:8080/health   # {"status":"
 
 The `Host` header must match the Ingress rule's host (`model-service.local`), that is how the Ingress selects the routing rule. On a managed cluster (EKS, GKE) the Ingress receives a real external load-balancer IP and is directly reachable; the port-forward is only needed because of the local Docker driver's network isolation.
 
+## Multi-Node Scheduling and Resilience
+
+The manifests also work on a multi-node cluster, which demonstrates pod distribution, self-healing, and scheduling control.
+
+```bash
+minikube start --nodes 3                 # a 3-node cluster (1 control plane + 2 workers)
+kubectl get nodes                        # minikube, minikube-m02, minikube-m03
+minikube image load model-service:latest
+kubectl apply -f k8s/
+kubectl get pods -o wide                 # the NODE column shows pod placement across nodes
+```
+
+**Self-healing on node failure.** Draining a node evicts its pods; Kubernetes reschedules them onto healthy nodes to maintain the desired replica count, so the service stays up:
+
+```bash
+kubectl drain minikube-m02 --ignore-daemonsets --delete-emptydir-data
+kubectl get pods -o wide                 # evicted pod reappears on another node
+kubectl get nodes                        # minikube-m02: Ready,SchedulingDisabled
+kubectl uncordon minikube-m02            # return the node to the schedulable pool
+```
+
+**Even spreading with pod anti-affinity.** By default the scheduler does not spread replicas perfectly evenly. The deployment includes a pod anti-affinity rule (`topologyKey: kubernetes.io/hostname`) that prefers to place each `model-service` pod on a different node, maximising resilience (losing one node loses only one replica). It uses the soft form (`preferredDuringSchedulingIgnoredDuringExecution`), which prefers spreading but still schedules if it cannot; the hard form (`requiredDuringScheduling...`) would leave pods Pending if the spread cannot be satisfied.
+
 ## Debugging and Observability
 
 Practical commands for inspecting and debugging the service.
