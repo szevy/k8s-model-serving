@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-config
+data:
+  MODEL_NAME: demo-model
+  LOG_LEVEL: info

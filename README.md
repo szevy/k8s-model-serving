@@ -23,9 +23,13 @@ This project packages a FastAPI model-inference service as a container image and
 │   ├── requirements.txt    # Python dependencies
 │   └── Dockerfile          # Container image definition
 └── k8s/                    # Kubernetes manifests
-    ├── deployment.yaml     # Deployment (health probes, resource limits)
+    ├── deployment.yaml     # Deployment (health probes, resource limits, config/secret injection)
     ├── service.yaml        # Service (NodePort)
-    └── hpa.yaml            # Horizontal Pod Autoscaler
+    ├── hpa.yaml            # Horizontal Pod Autoscaler
+    ├── configmap.yaml      # Non-sensitive configuration
+    ├── secret.example.yaml # Secret template (placeholder value; copy to secret.yaml, which is gitignored)
+    ├── job.yaml            # Run-to-completion batch Job example
+    └── cronjob.yaml        # Scheduled CronJob example
 ```
 
 ## Prerequisites
@@ -59,6 +63,12 @@ This project packages a FastAPI model-inference service as a container image and
    Note: after `minikube delete`, the cluster's image store is wiped, so the image must be re-loaded (not rebuilt, unless the code changed).
 
 4. **Deploy**
+
+   Create your real secret from the template first (this file is gitignored, never commit real secret values):
+   ```bash
+   cp k8s/secret.example.yaml k8s/secret.yaml    # then edit the value in secret.yaml
+   ```
+   Then apply everything:
    ```bash
    kubectl apply -f k8s/
    kubectl get pods                     # wait for pods to become 1/1 Running
@@ -86,6 +96,50 @@ This project packages a FastAPI model-inference service as a container image and
 - **Readiness probe** telling Kubernetes whether the pod is ready to receive traffic; a pod that fails readiness is held out of the Service's load balancing until it recovers.
 - **Resource requests and limits** requests for scheduling (100m CPU / 128Mi), limits as a ceiling (500m CPU / 256Mi).
 - **Horizontal Pod Autoscaler** scaling pods based on CPU (min 3, max 5, target 50% CPU); requires metrics-server (`minikube addons enable metrics-server`). If TARGETS shows `<unknown>` in `kubectl get hpa`, metrics-server is not running.
+
+## Configuration: ConfigMaps and Secrets
+
+Application configuration is externalised from the container image into the cluster, so it can change without rebuilding the image. The deployment injects these as environment variables via `envFrom`.
+
+- **ConfigMap** (`configmap.yaml`) holds non-sensitive config (`MODEL_NAME`, `LOG_LEVEL`). Safe to commit.
+- **Secret** (`secret.example.yaml`) is a template with a placeholder. Copy it to `secret.yaml`, set a real value, and keep `secret.yaml` out of git (it is gitignored). Kubernetes Secrets are only base64-encoded, not encrypted, so real secret values must never be committed; for production use a secrets manager or sealed-secrets.
+
+```bash
+kubectl apply -f k8s/configmap.yaml
+cp k8s/secret.example.yaml k8s/secret.yaml   # then edit the value
+kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/deployment.yaml         # references both via envFrom
+
+# verify the values are injected into the running container
+kubectl exec <pod-name> -- env | grep -E "MODEL_NAME|LOG_LEVEL|API_KEY"
+```
+
+Note: changing a ConfigMap or Secret does not automatically update running pods, environment variables are read at pod creation. After changing config, restart the pods to pick up the new values:
+
+```bash
+kubectl rollout restart deployment/model-service
+```
+
+## Batch Workloads: Jobs and CronJobs
+
+Not every workload is a long-running service. Jobs and CronJobs handle run-to-completion and scheduled tasks (in ML: one-off training runs, batch inference, scheduled retraining).
+
+- **Job** (`job.yaml`) runs a pod to completion, then stops. A completed Job pod shows `STATUS Completed` with `READY 0/1`, this is success, not failure: the READY column counts running containers, and a Job's container exits when done. This is the key difference from a Deployment, which stays `1/1 Running`.
+- **CronJob** (`cronjob.yaml`) spawns a Job on a cron schedule (`*/1 * * * *` = every minute). It is the Kubernetes-native equivalent of an external scheduler.
+
+```bash
+kubectl apply -f k8s/job.yaml
+kubectl get pods                     # demo-job pod: Running, then Completed
+kubectl logs job/demo-job
+
+kubectl apply -f k8s/cronjob.yaml
+kubectl get cronjobs
+kubectl get jobs                     # after ~1 min, the CronJob has spawned Job(s)
+
+# clean up when done (a CronJob keeps spawning jobs every minute otherwise)
+kubectl delete cronjob demo-cronjob
+kubectl delete job demo-job
+```
 
 ## Debugging and Observability
 

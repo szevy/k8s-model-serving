@@ -16,6 +16,11 @@ spec:
       - name: model-service
         image: model-service:latest
         imagePullPolicy: Never
+        envFrom:
+        - configMapRef:
+            name: model-config
+        - secretRef:
+            name: model-secret
         ports:
         - containerPort: 8000
         livenessProbe:
@@ -37,3 +42,4 @@ spec:
           limits:
             cpu: "500m"
             memory: "256Mi"
+            

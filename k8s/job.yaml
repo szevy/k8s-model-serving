@@ -1,0 +1,13 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: demo-job
+spec:
+  template:
+    spec:
+      containers:
+        - name: demo-task
+          image: busybox
+          command: ["/bin/sh", "-c", "echo 'Running batch task...'; sleep 5; echo 'Task complete'"]
+      restartPolicy: Never
+  backoffLimit: 3
