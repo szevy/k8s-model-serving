@@ -29,7 +29,8 @@ This project packages a FastAPI model-inference service as a container image and
     ├── configmap.yaml      # Non-sensitive configuration
     ├── secret.example.yaml # Secret template (placeholder value; copy to secret.yaml, which is gitignored)
     ├── job.yaml            # Run-to-completion batch Job example
-    └── cronjob.yaml        # Scheduled CronJob example
+    ├── cronjob.yaml        # Scheduled CronJob example
+    └── ingress.yaml        # Ingress (HTTP routing by hostname/path)
 ```
 
 ## Prerequisites
@@ -141,6 +142,29 @@ kubectl delete cronjob demo-cronjob
 kubectl delete job demo-job
 ```
 
+## External Access: Ingress
+
+The service can be exposed via an Ingress, which provides HTTP routing by hostname and path, one entry point routing to the right Service (a cleaner alternative to a NodePort or a load balancer per service). Ingress is two parts: the Ingress resource (the routing rules, in `ingress.yaml`) and an ingress controller (the engine that enforces them, here nginx).
+
+The routing chain is Ingress -> Service -> Pod: the Ingress picks the Service by host/path, and the Service load-balances across that app's pods.
+
+```bash
+minikube addons enable ingress               # install the nginx ingress controller
+kubectl get pods -n ingress-nginx            # wait for the controller pod to be Running
+kubectl apply -f k8s/ingress.yaml
+kubectl get ingress                          # ADDRESS appears after ~30-60s
+```
+
+Testing on the minikube Docker driver (WSL): the ingress IP (e.g. 192.168.49.2) is inside the Docker network and not directly routable from the host. Reach the service through the controller with a port-forward:
+
+```bash
+kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80
+# in another terminal:
+curl -H "Host: model-service.local" http://localhost:8080/health   # {"status":"ok"}
+```
+
+The `Host` header must match the Ingress rule's host (`model-service.local`), that is how the Ingress selects the routing rule. On a managed cluster (EKS, GKE) the Ingress receives a real external load-balancer IP and is directly reachable; the port-forward is only needed because of the local Docker driver's network isolation.
+
 ## Debugging and Observability
 
 Practical commands for inspecting and debugging the service.
@@ -192,6 +216,16 @@ kubectl logs <pod-name>                  # app is healthy: the issue is the prob
 kubectl apply -f k8s/                    # fix declaratively by re-applying the correct manifest
 ```
 The pod stays `Running` (the container and app are fine) but `Ready: False`, so it is removed from the Service's load balancing. The liveness probe still passes (correct path), so the pod is held out of traffic but not restarted, illustrating the difference between readiness (should I get traffic?) and liveness (should I be restarted?).
+
+**3. CrashLoopBackOff (container crashes on startup)**
+
+A container that exits with an error on startup is restarted repeatedly, entering CrashLoopBackOff:
+```bash
+kubectl get pods                         # STATUS CrashLoopBackOff, RESTARTS climbing
+kubectl describe pod <pod-name>          # Last State: Terminated, Exit Code: 1
+kubectl logs <pod-name> --previous       # the crashed container's output (the crash reason)
+```
+The key signature is a climbing RESTARTS count. `describe` shows `Last State: Terminated` with the exit code, confirming the container ran and died (not an image or scheduling problem). `kubectl logs --previous` is essential here: the current container is a fresh restart, so the reason it died is in the previous instance. On a healthy pod (RESTARTS 0) `--previous` returns "not found", it only has output when a container has actually crashed.
 
 ### Rollout history and rollback
 
